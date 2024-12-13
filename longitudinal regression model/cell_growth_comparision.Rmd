@@ -1,0 +1,2042 @@
+---
+title: "cell growth test"
+author: "Yuanyuan Wu"
+date: "2023-07-15"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Description
+This analysis examines the longitudinal growth rate of cells and identifies treatments that significantly affect cellular growth over time. A semi-logarithmic regression model with interaction terms was employed to capture the combined effects of time (Hours), the presence of MT-ND5(nd5) mutations, and tgfb1 treatment. Interaction terms with time were included to assess how these factors jointly influence growth trajectories. Treatments with significant interaction terms with time were considered to have a measurable impact on the cellular growth rate.
+
+The script below contains data organization and transformation, fitting of the model, model comparison, and model visualization on multiple datasets
+
+
+
+Cell growth data measured by Celigo, from 090622,293T, r8,d25
+
+```{r read in and organize data, include=FALSE}
+
+
+library(lme4)
+library(lmerTest)
+# Load the data
+df <- read.table("total cell number by celigo.txt", header=TRUE)
+
+# Reshape the data to long format
+df_long <- reshape(df, varying=names(df)[-1], v.names="cell_count", 
+                   timevar="replicate", times=names(df)[-1], direction="long")
+
+
+# Create a treatment variable
+df_long$treatment <- ifelse(startsWith(df_long$replicate, "ctr"), "ctr", "nd5")
+
+#rename the first column
+#colnames(df_long)[1] <- "Hour"
+
+```
+
+
+
+
+```{r model fitting, include=FALSE}
+
+# 
+# # Fit the mixed model
+# model <- lmer(log(cell_count) ~ treatment*Hour + (1|replicate), data=df_long)
+# # Get the summary of the model
+# summary(model)
+# 
+# 
+# 
+# model2 <- lm(log(cell_count) ~ treatment*Hour, data=df_long)
+# summary(model2)
+# #anova(model, model2)
+# ##results indicate random effect is not necessary
+# # 
+# # # Refit the mixed model with REML
+# # model_REML <- lmer(log(cell_count) ~ treatment + (1|replicate), data=df_long, REML=TRUE)
+# # # Fit the linear model with REML
+# # model2_REML <- lm(log(cell_count) ~ treatment, data=df_long)
+# # 
+# # # Compare using anova() or a likelihood ratio test
+# # anova(model_REML,model2_REML)
+# 
+# 
+# # Refit the mixed model with ML
+# model_ML <- lmer(log(cell_count) ~ treatment + (1|replicate), data=df_long, REML=FALSE)
+# # The linear model is already fitted with ML by default
+# 
+# # Compare using anova() or a likelihood ratio test
+# anova(model_ML, model2)
+
+
+### model 2 is better
+```
+
+### Fitting with treatment time interation
+\[\log_{10}(\text{cell count}) = \beta_0 + \beta_1 (\text{treatment}) + \beta_2 (\text{time}) + \beta_3 (\text{treatment} \times \text{time}) + \epsilon\]
+
+
+
+```{r semi log fitting with time treatment interaction,echo=FALSE}
+# # Fit the linear model
+# model <- lm(log(cell_count) ~ treatment, data=df_long)
+# 
+# # Get the summary of the model
+# summary(model)
+
+
+
+## treatment effect along time
+# Fit the model with interaction term
+
+
+
+model <- lm(log(cell_count) ~ treatment * time..hour., data = df_long)
+summary(model)
+
+
+
+```
+```{r plot}
+
+
+library(ggplot2)
+# Create a new data frame for predictions
+newdata <- expand.grid(time..hour. = seq(min(df_long$time..hour.), max(df_long$time..hour.), length.out = 100),
+                       treatment = c("ctr", "nd5"))
+
+# Generate predictions
+newdata$pred <- predict(model, newdata)
+
+# Convert treatment to factor for plotting
+newdata$treatment <- as.factor(newdata$treatment)
+
+# Plot the observed data
+ggplot(df_long, aes(x = time..hour., y = log(cell_count), color = treatment)) +
+  geom_point() +
+  # Add the model predictions
+  geom_line(data = newdata, aes(x = time..hour., y = pred)) +
+  labs(x = "Time (hours)", y = "Log-transformed cell count") +
+  theme_classic()
+
+
+# Extract coefficients and confidence intervals
+coef <- summary(model)$coefficients
+slopes <- c(coef["time..hour.", "Estimate"], coef["time..hour.", "Estimate"] + coef["treatmentnd5:time..hour.", "Estimate"])
+CI <- confint(model)[c("time..hour.", "treatmentnd5:time..hour."), ]
+
+
+# Extract coefficients, standard errors, and covariance
+coef <- summary(model)$coefficients
+cov <- vcov(model)
+
+# Compute slopes and their standard errors
+slope.ctr <- coef["time..hour.", "Estimate"]
+slope.nd5 <- slope.ctr + coef["treatmentnd5:time..hour.", "Estimate"]
+se.ctr <- coef["time..hour.", "Std. Error"]
+se.nd5 <- sqrt(se.ctr^2 + coef["treatmentnd5:time..hour.", "Std. Error"]^2 + 2 * cov["time..hour.", "treatmentnd5:time..hour."])
+
+# Compute 95% confidence intervals
+CI.ctr <- c(slope.ctr - 1.96 * se.ctr, slope.ctr + 1.96 * se.ctr)
+CI.nd5 <- c(slope.nd5 - 1.96 * se.nd5, slope.nd5 + 1.96 * se.nd5)
+
+# Create a data frame for slopes
+slope_data <- data.frame(treatment = c("ctr", "nd5"), slope = c(slope.ctr, slope.nd5), lower = c(CI.ctr[1], CI.nd5[1]), upper = c(CI.ctr[2], CI.nd5[2]))
+
+
+# # Plot the observed data
+# ggplot(df_long, aes(x = time..hour., y = log(cell_count), color = treatment)) +
+#   geom_point() +
+#   # Add the model predictions
+#   geom_line(data = newdata, aes(x = time..hour., y = pred)) +
+#   # Add the slopes
+#   geom_text(data = slope_data, aes(x = Inf, y = slope, label = paste("Slope =", round(slope, 2))), hjust = "inward", vjust = "inward") +
+#   labs(x = "Time (hours)", y = "Log-transformed cell count") +
+#   theme_minimal()
+# 
+# # Plot the observed data
+# ggplot(df_long, aes(x = time..hour., y = log(cell_count), color = treatment)) +
+#   geom_point() +
+#   # Add the model predictions
+#   geom_line(data = newdata, aes(x = time..hour., y = pred)) +
+#   # Add the slopes
+#   geom_text(data = slope_data, aes(x = Inf, y = slope, label = paste("Slope =", round(slope, 2))), hjust = "inward", vjust = "inward") +
+#   # Add error bars for the confidence intervals
+#   geom_errorbarh(data = slope_data, aes(xmin = lower, xmax = upper, y = slope), height = 0.1, color = "black") +
+#   labs(x = "Time (hours)", y = "Log-transformed cell count") +
+#   theme_minimal()
+
+# 
+# # Plot the observed data
+# ggplot(df_long, aes(x = time..hour., y = log(cell_count), color = treatment)) +
+#   geom_point() +
+#   # Add the model predictions
+#   geom_line(data = newdata, aes(x = time..hour., y = pred)) +
+#   # Add the slopes
+#   geom_text(data = slope_data, aes(x = Inf, y = slope, label = paste("Slope =", round(slope, 2))), hjust = "inward", vjust = "inward") +
+#   # Add error bars for the confidence intervals
+#   geom_errorbarh(data = slope_data, aes(x = slope, xmin = lower, xmax = upper, y = treatment), height = 0.1, color = "black") +
+#   labs(x = "Time (hours)", y = "Log-transformed cell count") +
+#   theme_minimal()
+
+
+# Convert treatment to a factor with numeric levels
+df_long$treatment_num <- as.numeric(factor(df_long$treatment))
+slope_data$treatment_num <- as.numeric(factor(slope_data$treatment))
+
+# Plot the observed data
+ggplot(df_long, aes(x = time..hour., y = log(cell_count), color = treatment)) +
+  geom_point() +
+  # Add the model predictions
+  geom_line(data = newdata, aes(x = time..hour., y = pred)) +
+  # Add the slopes
+  geom_text(data = slope_data, aes(x = Inf, y = slope, label = paste("Slope =", round(slope, 2))), hjust = "inward", vjust = "inward") +
+  # Add error bars for the confidence intervals
+  geom_errorbarh(data = slope_data, aes(x = slope, xmin = lower, xmax = upper, y = treatment_num), height = 0.1, color = "black") +
+  labs(x = "Time (hours)", y = "Log-transformed cell count") +
+  theme_minimal()
+
+
+```
+### Slope with se when fitting seperately
+```{r compare slope with emmeans, echo = FALSE}
+# Fit the model (assuming that 'time' is your time variable and 'group' is your treatment variable)
+model <- lm(log(cell_count) ~ treatment * time..hour., data = df_long)
+
+# Get the emmeans for the interaction (which represents the slopes)
+library(emmeans)
+library(broom)
+library(purrr)
+
+# Fit a model to each treatment
+models <- df_long %>%
+  split(.$treatment) %>%
+  map(~ lm(log(cell_count) ~ time..hour., data = .))
+
+# Tidy up the results
+tidied <- map_df(models, tidy, .id = "treatment")
+
+
+
+# Compute the EMMs
+#emm <- emmeans(tidied, "time..hour.", by = "treatment")
+
+
+# Compute the slopes
+slopes <- map(models, ~ coef(.)["time..hour."])
+
+# Convert the slopes to a data frame
+slopes_df <- as.data.frame(do.call(rbind, slopes))
+names(slopes_df) <- "slope"
+
+# Compute the standard errors of the slopes
+se <- map(models, ~ sqrt(vcov(.)["time..hour.", "time..hour."]))
+
+# Convert the standard errors to a data frame
+se_df <- as.data.frame(do.call(rbind, se))
+names(se_df) <- "se"
+
+# Combine the slopes and standard errors into one data frame
+results <- cbind(slopes_df, se_df)
+
+# Print the results
+print(results)
+
+
+```
+
+
+
+### test on 090722, hek293_R8_d26
+
+```{r all for 090723 hek293 R8 d26, include=FALSE}
+
+
+
+# Load the data
+df <- read.table("090723_hek293_R8_d26_total cell number organized for export.txt", header=TRUE)
+
+# Reshape the data to long format
+df_long <- reshape(df, varying=names(df)[-1], v.names="cell_count", 
+                   timevar="replicate", times=names(df)[-1], direction="long")
+
+
+# Create a treatment variable
+df_long$treatment <- ifelse(startsWith(df_long$replicate, "ctr"), "ctr", "nd5")
+
+
+# 
+# # Fit the mixed model
+# model <- lmer(log(cell_count) ~ treatment + (1|replicate), data=df_long)
+# # Get the summary of the model
+# summary(model)
+# 
+# ##results indicate random effect is not necessary
+
+
+model <- lm(log(cell_count) ~ treatment * Hours, data = df_long)
+summary(model)
+
+
+# Create a new data frame for predictions
+newdata <- expand.grid(Hours = seq(min(df_long$Hours), max(df_long$Hours), length.out = 100),
+                       treatment = c("ctr", "nd5"))
+
+# Generate predictions
+newdata$pred <- predict(model, newdata)
+
+# Convert treatment to factor for plotting
+newdata$treatment <- as.factor(newdata$treatment)
+
+# Plot the observed data
+ggplot(df_long, aes(x = Hours, y = log(cell_count), color = treatment)) +
+  geom_point() +
+  # Add the model predictions
+  geom_line(data = newdata, aes(x = Hours, y = pred)) +
+  labs(x = "Time (hours)", y = "Log-transformed cell count") +
+  theme_classic()
+
+
+
+##calculate se and slope when fitted seorately
+
+# Fit a model to each treatment
+models <- df_long %>%
+  split(.$treatment) %>%
+  map(~ lm(log(cell_count) ~ Hours, data = .))
+
+# Tidy up the results
+tidied <- map_df(models, tidy, .id = "treatment")
+
+#library(emmeans)
+
+# Compute the EMMs
+#emm <- emmeans(tidied, "time..hour.", by = "treatment")
+
+
+# Compute the slopes
+slopes <- map(models, ~ coef(.)["Hours"])
+
+# Convert the slopes to a data frame
+slopes_df <- as.data.frame(do.call(rbind, slopes))
+names(slopes_df) <- "slope"
+
+# Compute the standard errors of the slopes
+se <- map(models, ~ sqrt(vcov(.)["Hours", "Hours"]))
+
+# Convert the standard errors to a data frame
+se_df <- as.data.frame(do.call(rbind, se))
+names(se_df) <- "se"
+
+# Combine the slopes and standard errors into one data frame
+results <- cbind(slopes_df, se_df)
+
+# Print the results
+print(results)
+
+
+```
+
+### Fitting hek293 101022_R3_d12
+
+```{r 101022_R3_d12 data}
+
+
+##all libraries
+library(ggplot2)
+library(emmeans)
+library(broom)
+library(purrr)
+library(lme4)
+library(lmerTest)
+# Load the data
+df <- read.table("101022_R3_d12.txt", header=TRUE)
+
+# Reshape the data to long format
+df_long <- reshape(df, varying=names(df)[-1], v.names="cell_count", 
+                   timevar="replicate", times=names(df)[-1], direction="long")
+
+
+# Create a treatment variable
+df_long$treatment <- ifelse(startsWith(df_long$replicate, "ctr"), "ctr", "nd5")
+
+
+# 
+# # Fit the mixed model
+# model <- lmer(log(cell_count) ~ treatment + (1|replicate), data=df_long)
+# # Get the summary of the model
+# summary(model)
+# 
+# ##results indicate random effect is not necessary
+
+
+model <- lm(log(cell_count) ~ treatment * Hours, data = df_long)
+summary(model)
+
+
+# Create a new data frame for predictions
+newdata <- expand.grid(Hours = seq(min(df_long$Hours), max(df_long$Hours), length.out = 100),
+                       treatment = c("ctr", "nd5"))
+
+# Generate predictions
+newdata$pred <- predict(model, newdata)
+
+# Convert treatment to factor for plotting
+newdata$treatment <- as.factor(newdata$treatment)
+
+# Plot the observed data
+ggplot(df_long, aes(x = Hours, y = log(cell_count), color = treatment)) +
+  geom_point() +
+  # Add the model predictions
+  geom_line(data = newdata, aes(x = Hours, y = pred)) +
+  labs(x = "Time (hours)", y = "Log-transformed cell count") +
+  theme_classic()
+
+
+
+##calculate se and slope when fitted seorately
+
+# Fit a model to each treatment
+models <- df_long %>%
+  split(.$treatment) %>%
+  map(~ lm(log(cell_count) ~ Hours, data = .))
+
+# Tidy up the results
+tidied <- map_df(models, tidy, .id = "treatment")
+
+#library(emmeans)
+
+# Compute the EMMs
+#emm <- emmeans(tidied, "time..hour.", by = "treatment")
+
+
+# Compute the slopes
+slopes <- map(models, ~ coef(.)["Hours"])
+
+# Convert the slopes to a data frame
+slopes_df <- as.data.frame(do.call(rbind, slopes))
+names(slopes_df) <- "slope"
+
+# Compute the standard errors of the slopes
+se <- map(models, ~ sqrt(vcov(.)["Hours", "Hours"]))
+
+# Convert the standard errors to a data frame
+se_df <- as.data.frame(do.call(rbind, se))
+names(se_df) <- "se"
+
+# Combine the slopes and standard errors into one data frame
+results <- cbind(slopes_df, se_df)
+
+# Print the results
+print(results)
+
+
+
+
+
+```
+### Fititng 101622-hek293-d18-R3 
+```{r 101622-hek293-d18-R3 data}
+
+
+##all libraries
+library(ggplot2)
+library(emmeans)
+library(broom)
+library(purrr)
+library(lme4)
+library(lmerTest)
+# Load the data
+df <- read.table("101622-hek293-d18-R3 for export.txt", header=TRUE)
+
+# Reshape the data to long format
+df_long <- reshape(df, varying=names(df)[-1], v.names="cell_count", 
+                   timevar="replicate", times=names(df)[-1], direction="long")
+
+
+# Create a treatment variable
+df_long$treatment <- ifelse(startsWith(df_long$replicate, "ctr"), "ctr", "nd5")
+
+
+# 
+# # Fit the mixed model
+# model <- lmer(log(cell_count) ~ treatment + (1|replicate), data=df_long)
+# # Get the summary of the model
+# summary(model)
+# 
+# ##results indicate random effect is not necessary
+
+
+model <- lm(log(cell_count) ~ treatment * Hours, data = df_long)
+summary(model)
+
+
+# Create a new data frame for predictions
+newdata <- expand.grid(Hours = seq(min(df_long$Hours), max(df_long$Hours), length.out = 100),
+                       treatment = c("ctr", "nd5"))
+
+# Generate predictions
+newdata$pred <- predict(model, newdata)
+
+# Convert treatment to factor for plotting
+newdata$treatment <- as.factor(newdata$treatment)
+
+# Plot the observed data
+ggplot(df_long, aes(x = Hours, y = log(cell_count), color = treatment)) +
+  geom_point() +
+  # Add the model predictions
+  geom_line(data = newdata, aes(x = Hours, y = pred)) +
+  labs(x = "Time (hours)", y = "Log-transformed cell count") +
+  theme_classic()
+
+
+
+##calculate se and slope when fitted seorately
+
+# Fit a model to each treatment
+models <- df_long %>%
+  split(.$treatment) %>%
+  map(~ lm(log(cell_count) ~ Hours, data = .))
+
+# Tidy up the results
+tidied <- map_df(models, tidy, .id = "treatment")
+
+#library(emmeans)
+
+# Compute the EMMs
+#emm <- emmeans(tidied, "time..hour.", by = "treatment")
+
+
+# Compute the slopes
+slopes <- map(models, ~ coef(.)["Hours"])
+
+# Convert the slopes to a data frame
+slopes_df <- as.data.frame(do.call(rbind, slopes))
+names(slopes_df) <- "slope"
+
+# Compute the standard errors of the slopes
+se <- map(models, ~ sqrt(vcov(.)["Hours", "Hours"]))
+
+# Convert the standard errors to a data frame
+se_df <- as.data.frame(do.call(rbind, se))
+names(se_df) <- "se"
+
+# Combine the slopes and standard errors into one data frame
+results <- cbind(slopes_df, se_df)
+
+# Print the results
+print(results)
+
+
+
+
+
+```
+
+
+### Fitting 011723_hek293_rl2
+
+```{r 011723_hek293_rl2}
+
+
+##all libraries
+library(ggplot2)
+library(emmeans)
+library(broom)
+library(purrr)
+library(lme4)
+library(lmerTest)
+# Load the data
+df <- read.table("011723_hek293_rl2_export.txt", header=TRUE)
+
+# Reshape the data to long format
+df_long <- reshape(df, varying=names(df)[-1], v.names="cell_count", 
+                   timevar="replicate", times=names(df)[-1], direction="long")
+
+
+
+
+# Create a treatment variable
+df_long$treatment <- ifelse(startsWith(df_long$replicate, "c2"), "c2", 
+                            ifelse(startsWith(df_long$replicate, "c1"), "c1", "n"))
+
+
+#reorder to n, c1, c2, so that n is the reference level
+df_long$treatment <- factor(df_long$treatment, levels = c("n", "c1", "c2"))
+
+
+# 
+# # Fit the mixed model
+# model <- lmer(log(cell_count) ~ treatment + (1|replicate), data=df_long)
+# # Get the summary of the model
+# summary(model)
+# 
+# ##results indicate random effect is not necessary
+
+
+model <- lm(log(cell_count) ~ treatment * Hours, data = df_long)
+summary(model)
+
+
+# Create a new data frame for predictions
+newdata <- expand.grid(Hours = seq(min(df_long$Hours), max(df_long$Hours), length.out = 100),
+                       treatment = c("c1", "c2","n"))
+
+# Generate predictions
+newdata$pred <- predict(model, newdata)
+
+# Convert treatment to factor for plotting
+newdata$treatment <- as.factor(newdata$treatment)
+
+# Plot the observed data
+ggplot(df_long, aes(x = Hours, y = log(cell_count), color = treatment)) +
+  geom_point() +
+  # Add the model predictions
+  geom_line(data = newdata, aes(x = Hours, y = pred)) +
+  labs(x = "Time (hours)", y = "Log-transformed cell count") +
+  theme_classic()
+
+
+
+##calculate se and slope when fitted seorately
+
+# Fit a model to each treatment
+models <- df_long %>%
+  split(.$treatment) %>%
+  map(~ lm(log(cell_count) ~ Hours, data = .))
+
+# Tidy up the results
+tidied <- map_df(models, tidy, .id = "treatment")
+
+#library(emmeans)
+
+# Compute the EMMs
+#emm <- emmeans(tidied, "time..hour.", by = "treatment")
+
+
+# Compute the slopes
+slopes <- map(models, ~ coef(.)["Hours"])
+
+# Convert the slopes to a data frame
+slopes_df <- as.data.frame(do.call(rbind, slopes))
+names(slopes_df) <- "slope"
+
+# Compute the standard errors of the slopes
+se <- map(models, ~ sqrt(vcov(.)["Hours", "Hours"]))
+
+# Convert the standard errors to a data frame
+se_df <- as.data.frame(do.call(rbind, se))
+names(se_df) <- "se"
+
+# Combine the slopes and standard errors into one data frame
+results <- cbind(slopes_df, se_df)
+
+# Print the results
+print(results)
+
+
+
+
+
+```
+
+
+
+### Fitting 120921_12a_d11
+```{r 120921_12a_d11}
+
+
+##all libraries
+library(ggplot2)
+library(emmeans)
+library(broom)
+library(purrr)
+library(lme4)
+library(lmerTest)
+# Load the data
+df <- read.table("120921_12a_d11.txt", header=TRUE)
+
+# Reshape the data to long format
+df_long <- reshape(df, varying=names(df)[-1], v.names="cell_count", 
+                   timevar="replicate", times=names(df)[-1], direction="long")
+
+
+
+
+# Create a treatment variable
+df_long$treatment <- ifelse(startsWith(df_long$replicate, "c1"), "c1", "n")
+                            #ifelse(startsWith(df_long$replicate, "c2-"), "c2-", "n"))
+
+
+
+
+
+# 
+# # Fit the mixed model
+# model <- lmer(log(cell_count) ~ treatment + (1|replicate), data=df_long)
+# # Get the summary of the model
+# summary(model)
+# 
+# ##results indicate random effect is not necessary
+
+
+model <- lm(log(cell_count) ~ treatment * Hours, data = df_long)
+summary(model)
+
+
+# Create a new data frame for predictions
+newdata <- expand.grid(Hours = seq(min(df_long$Hours), max(df_long$Hours), length.out = 100),
+                       treatment = c("c1","n"))
+
+# Generate predictions
+newdata$pred <- predict(model, newdata)
+
+# Convert treatment to factor for plotting
+newdata$treatment <- as.factor(newdata$treatment)
+
+# Plot the observed data
+ggplot(df_long, aes(x = Hours, y = log(cell_count), color = treatment)) +
+  geom_point() +
+  # Add the model predictions
+  geom_line(data = newdata, aes(x = Hours, y = pred)) +
+  labs(x = "Time (hours)", y = "Log-transformed cell count") +
+  theme_classic()
+
+
+
+##calculate se and slope when fitted seorately
+
+# Fit a model to each treatment
+models <- df_long %>%
+  split(.$treatment) %>%
+  map(~ lm(log(cell_count) ~ Hours, data = .))
+
+# Tidy up the results
+tidied <- map_df(models, tidy, .id = "treatment")
+
+#library(emmeans)
+
+# Compute the EMMs
+#emm <- emmeans(tidied, "time..hour.", by = "treatment")
+
+
+# Compute the slopes
+slopes <- map(models, ~ coef(.)["Hours"])
+
+# Convert the slopes to a data frame
+slopes_df <- as.data.frame(do.call(rbind, slopes))
+names(slopes_df) <- "slope"
+
+# Compute the standard errors of the slopes
+se <- map(models, ~ sqrt(vcov(.)["Hours", "Hours"]))
+
+# Convert the standard errors to a data frame
+se_df <- as.data.frame(do.call(rbind, se))
+names(se_df) <- "se"
+
+# Combine the slopes and standard errors into one data frame
+results <- cbind(slopes_df, se_df)
+
+# Print the results
+print(results)
+
+
+
+
+
+```
+
+
+### Fitting 111521 hek293 d30
+
+```{r 111521_hek293_d30}
+
+
+##all libraries
+library(ggplot2)
+library(emmeans)
+library(broom)
+library(purrr)
+library(lme4)
+library(lmerTest)
+# Load the data
+df <- read.table("111521_hek293_d30_export.txt", header=TRUE)
+
+# Reshape the data to long format
+df_long <- reshape(df, varying=names(df)[-1], v.names="cell_count", 
+                   timevar="replicate", times=names(df)[-1], direction="long")
+
+
+# Create a treatment variable
+df_long$treatment <- ifelse(startsWith(df_long$replicate, "ctr"), "ctr", "nd5")
+
+
+# 
+# # Fit the mixed model
+# model <- lmer(log(cell_count) ~ treatment + (1|replicate), data=df_long)
+# # Get the summary of the model
+# summary(model)
+# 
+# ##results indicate random effect is not necessary
+
+
+model <- lm(log(cell_count) ~ treatment * Hours, data = df_long)
+summary(model)
+
+
+# Create a new data frame for predictions
+newdata <- expand.grid(Hours = seq(min(df_long$Hours), max(df_long$Hours), length.out = 100),
+                       treatment = c("ctr", "nd5"))
+
+# Generate predictions
+newdata$pred <- predict(model, newdata)
+
+# Convert treatment to factor for plotting
+newdata$treatment <- as.factor(newdata$treatment)
+
+# Plot the observed data
+ggplot(df_long, aes(x = Hours, y = log(cell_count), color = treatment)) +
+  geom_point() +
+  # Add the model predictions
+  geom_line(data = newdata, aes(x = Hours, y = pred)) +
+  labs(x = "Time (hours)", y = "Log-transformed cell count") +
+  theme_classic()
+
+
+
+##calculate se and slope when fitted seorately
+
+# Fit a model to each treatment
+models <- df_long %>%
+  split(.$treatment) %>%
+  map(~ lm(log(cell_count) ~ Hours, data = .))
+
+# Tidy up the results
+tidied <- map_df(models, tidy, .id = "treatment")
+
+#library(emmeans)
+
+# Compute the EMMs
+#emm <- emmeans(tidied, "time..hour.", by = "treatment")
+
+
+# Compute the slopes
+slopes <- map(models, ~ coef(.)["Hours"])
+
+# Convert the slopes to a data frame
+slopes_df <- as.data.frame(do.call(rbind, slopes))
+names(slopes_df) <- "slope"
+
+# Compute the standard errors of the slopes
+se <- map(models, ~ sqrt(vcov(.)["Hours", "Hours"]))
+
+# Convert the standard errors to a data frame
+se_df <- as.data.frame(do.call(rbind, se))
+names(se_df) <- "se"
+
+# Combine the slopes and standard errors into one data frame
+results <- cbind(slopes_df, se_df)
+
+# Print the results
+print(results)
+
+
+
+
+
+```
+### Fitting 032322_12A_R4_d10
+```{r 032322_12A_R4_d10}
+
+
+##all libraries
+library(ggplot2)
+library(emmeans)
+library(broom)
+library(purrr)
+library(lme4)
+library(lmerTest)
+# Load the data
+df <- read.table("032322_12a_R4_d10.txt", header=TRUE)
+
+# Reshape the data to long format
+df_long <- reshape(df, varying=names(df)[-1], v.names="cell_count", 
+                   timevar="replicate", times=names(df)[-1], direction="long")
+
+
+# Create a treatment variable
+assign_treatment <- function(replicate) {
+  prefix <- substr(replicate, 1, 2)  # get the first two characters
+  if (prefix %in% c('a1', 'a2', 'a3')) {
+    return('ctr-')
+  } else if (prefix %in% c('b1', 'b2', 'b3')) {
+    return('ctr+')
+  } else if (prefix %in% c('a4', 'a5', 'a6')) {
+    return('nd5-')
+  } else if (prefix %in% c('b4', 'b5', 'b6')) {
+    return('nd5+')
+  } else {
+    return('unknown')  # or whatever default value you want
+  }
+}
+
+df_long$treatment <- sapply(df_long$replicate, assign_treatment)
+
+
+#export the long table
+#write.csv(df_long, file = "032322_12a_R4_d10_organized.csv")
+
+
+
+# 
+# # Fit the mixed model
+# model <- lmer(log(cell_count) ~ treatment + (1|replicate), data=df_long)
+# # Get the summary of the model
+# summary(model)
+# 
+# ##results indicate random effect is not necessary
+
+
+
+model <- lm(log(cell_count) ~ treatment * Hours, data = df_long)
+summary(model)
+ 
+# ###testing emmeans
+# library(emmeans)
+# emmeans_result <- emmeans(model, pairwise ~ treatment | Hours)
+# summary(emmeans_result)
+
+#######################all pairs###################################
+# Get the levels of the treatment factor
+df_long$treatment <- as.factor(df_long$treatment)
+treatments <- levels(df_long$treatment)
+
+# Initialize a list to store the model summaries
+model_summaries <- list()
+
+# Loop over the treatments
+for (treat in treatments) {
+  # Relevel the treatment factor so that the current treatment is the reference category
+  df_long$treatment <- relevel(df_long$treatment, ref = treat)
+  
+  # Fit the model
+  model <- lm(log(cell_count) ~ treatment * Hours, data = df_long)
+  
+  # Store the summary of the model in the list
+  model_summaries[[treat]] <- summary(model)
+}
+
+# Now model_summaries is a list of model summaries, one for each treatment. You can access 
+# them using model_summaries[["ctr-"]], model_summaries[["ctr+"]], etc.
+
+print(model_summaries[["nd5+"]])
+
+
+###########################################################################################
+
+# Create a new data frame for predictions
+newdata <- expand.grid(Hours = seq(min(df_long$Hours), max(df_long$Hours), length.out = 100),
+                       treatment = c("ctr-", "ctr+","nd5-","nd5+"))
+
+# Generate predictions
+newdata$pred <- predict(model, newdata)
+
+# Convert treatment to factor for plotting
+newdata$treatment <- as.factor(newdata$treatment)
+
+# Plot the observed data
+ggplot(df_long, aes(x = Hours, y = log(cell_count), color = treatment)) +
+  geom_point() +
+  # Add the model predictions
+  geom_line(data = newdata, aes(x = Hours, y = pred)) +
+  labs(x = "Time (hours)", y = "Log-transformed cell count") +
+  theme_classic()
+
+
+
+##calculate se and slope when fitted seorately
+
+# Fit a model to each treatment
+models <- df_long %>%
+  split(.$treatment) %>%
+  map(~ lm(log(cell_count) ~ Hours, data = .))
+
+# Tidy up the results
+tidied <- map_df(models, tidy, .id = "treatment")
+
+#library(emmeans)
+
+# Compute the EMMs
+#emm <- emmeans(tidied, "time..hour.", by = "treatment")
+
+
+# Compute the slopes
+slopes <- map(models, ~ coef(.)["Hours"])
+
+# Convert the slopes to a data frame
+slopes_df <- as.data.frame(do.call(rbind, slopes))
+names(slopes_df) <- "slope"
+
+# Compute the standard errors of the slopes
+se <- map(models, ~ sqrt(vcov(.)["Hours", "Hours"]))
+
+# Convert the standard errors to a data frame
+se_df <- as.data.frame(do.call(rbind, se))
+names(se_df) <- "se"
+
+# Combine the slopes and standard errors into one data frame
+results <- cbind(slopes_df, se_df)
+
+# Print the results
+print(results)
+
+##################fitting with interaction term of the treatment##############################################################################
+# Splitting the treatment column into two separate columns for nd5 and tgfb1
+df_long$nd5 <- ifelse(grepl("nd5", df_long$treatment), "nd5", "ctr")
+df_long$tgfb1 <- ifelse(grepl("\\+", df_long$treatment), "plus", "minus")
+
+# Fit the linear model
+model <- lm(log(cell_count) ~ Hours * nd5 * tgfb1, data=df_long)
+
+# Get the summary of the model
+summary(model)
+
+
+model2 <- lm(log(cell_count) ~ Hours*nd5 + Hours* tgfb1, data=df_long)
+summary(model2)
+
+
+model3 <- lm(log(cell_count) ~ Hours*nd5 + Hours* tgfb1 + Hours:nd5:tgfb1, data=df_long)
+summary(model3)
+  
+anova(model3, model)
+anova(model2,model3)
+
+#pick model 3 as the complex model is not better
+
+```
+```{r 032322_12A_R4_d10_copy_for treatment rename}
+
+
+##all libraries
+library(ggplot2)
+library(emmeans)
+library(broom)
+library(purrr)
+library(lme4)
+library(lmerTest)
+# Load the data
+df <- read.table("032322_12a_R4_d10.txt", header=TRUE)
+
+# Reshape the data to long format
+df_long <- reshape(df, varying=names(df)[-1], v.names="cell_count", 
+                   timevar="replicate", times=names(df)[-1], direction="long")
+
+
+# Create a treatment variable
+assign_treatment <- function(replicate) {
+  prefix <- substr(replicate, 1, 2)  # get the first two characters
+  if (prefix %in% c('a1', 'a2', 'a3')) {
+    return('Control')
+  } else if (prefix %in% c('b1', 'b2', 'b3')) {
+    return('Control_TGFB1+')
+  } else if (prefix %in% c('a4', 'a5', 'a6')) {
+    return('MT-ND5')
+  } else if (prefix %in% c('b4', 'b5', 'b6')) {
+    return('MT-ND5_TGFB1+')
+  } else {
+    return('unknown')  # or whatever default value you want
+  }
+}
+
+df_long$treatment <- sapply(df_long$replicate, assign_treatment)
+
+
+#export the long table
+#write.csv(df_long, file = "032322_12a_R4_d10_organized.csv")
+
+
+
+# 
+# # Fit the mixed model
+# model <- lmer(log(cell_count) ~ treatment + (1|replicate), data=df_long)
+# # Get the summary of the model
+# summary(model)
+# 
+# ##results indicate random effect is not necessary
+
+
+
+model <- lm(log(cell_count) ~ treatment * Hours, data = df_long)
+summary(model)
+ 
+# ###testing emmeans
+# library(emmeans)
+# emmeans_result <- emmeans(model, pairwise ~ treatment | Hours)
+# summary(emmeans_result)
+
+#######################all pairs###################################
+# Get the levels of the treatment factor
+df_long$treatment <- as.factor(df_long$treatment)
+treatments <- levels(df_long$treatment)
+
+# Initialize a list to store the model summaries
+model_summaries <- list()
+
+# Loop over the treatments
+for (treat in treatments) {
+  # Relevel the treatment factor so that the current treatment is the reference category
+  df_long$treatment <- relevel(df_long$treatment, ref = treat)
+  
+  # Fit the model
+  model <- lm(log(cell_count) ~ treatment * Hours, data = df_long)
+  
+  # Store the summary of the model in the list
+  model_summaries[[treat]] <- summary(model)
+}
+
+# Now model_summaries is a list of model summaries, one for each treatment. You can access 
+# them using model_summaries[["ctr-"]], model_summaries[["ctr+"]], etc.
+
+print(model_summaries[["nd5+"]])
+
+
+###########################################################################################
+
+# Create a new data frame for predictions
+newdata <- expand.grid(Hours = seq(min(df_long$Hours), max(df_long$Hours), length.out = 100),
+                       treatment = c("Control", "Control_TGFB1+","MT-ND5","MT-ND5_TGFB1+"))
+
+# Generate predictions
+newdata$pred <- predict(model, newdata)
+
+# Convert treatment to factor for plotting
+newdata$treatment <- as.factor(newdata$treatment)
+
+# Plot the observed data
+my_plot <- ggplot(df_long, aes(x = Hours, y = log(cell_count), color = treatment,shape = treatment)) +
+  geom_point() +
+  # Add the model predictions
+  geom_line(data = newdata, aes(x = Hours, y = pred)) +
+  labs(x = "Time (hours)", y = "Log-transformed cell count") +
+  theme_classic()
+
+# Save the plot as an SVG file
+#ggsave(filename = "12A_growth_curve.svg", plot = my_plot, device = "svg")
+ggsave(filename = "12A_growth_curve.svg", plot = my_plot, device = "svg", width = 8, height = 4, units = "in")
+##calculate se and slope when fitted seorately
+
+# Fit a model to each treatment
+models <- df_long %>%
+  split(.$treatment) %>%
+  map(~ lm(log(cell_count) ~ Hours, data = .))
+
+# Tidy up the results
+tidied <- map_df(models, tidy, .id = "treatment")
+
+#library(emmeans)
+
+# Compute the EMMs
+#emm <- emmeans(tidied, "time..hour.", by = "treatment")
+
+
+# Compute the slopes
+slopes <- map(models, ~ coef(.)["Hours"])
+
+# Convert the slopes to a data frame
+slopes_df <- as.data.frame(do.call(rbind, slopes))
+names(slopes_df) <- "slope"
+
+# Compute the standard errors of the slopes
+se <- map(models, ~ sqrt(vcov(.)["Hours", "Hours"]))
+
+# Convert the standard errors to a data frame
+se_df <- as.data.frame(do.call(rbind, se))
+names(se_df) <- "se"
+
+# Combine the slopes and standard errors into one data frame
+results <- cbind(slopes_df, se_df)
+
+# Print the results
+print(results)
+
+##################fitting with interaction term of the treatment##############################################################################
+# Splitting the treatment column into two separate columns for nd5 and tgfb1
+df_long$nd5 <- ifelse(grepl("ND5", df_long$treatment), "nd5", "ctr")
+df_long$tgfb1 <- ifelse(grepl("\\+", df_long$treatment), "plus", "minus")
+
+# Fit the linear model
+model <- lm(log(cell_count) ~ Hours * nd5 * tgfb1, data=df_long)
+
+# Get the summary of the model
+summary(model)
+
+
+model2 <- lm(log(cell_count) ~ Hours*nd5 + Hours* tgfb1, data=df_long)
+summary(model2)
+
+
+model3 <- lm(log(cell_count) ~ Hours*nd5 + Hours* tgfb1 + Hours:nd5:tgfb1, data=df_long)
+summary(model3)
+  
+anova(model3, model)
+anova(model2,model3)
+
+#pick model 3 as the complex model is not better
+
+```
+
+### Fitting 031123_12a_d10
+```{r 031123_12a_d10}
+
+
+##all libraries
+library(ggplot2)
+library(emmeans)
+library(broom)
+library(purrr)
+library(lme4)
+library(lmerTest)
+# Load the data
+#df <- read.table("031123_12a_d10.txt", header=TRUE)
+
+#There is NA in the row
+df <- read.delim("031123_12a_d10.txt", header = TRUE, na.strings = "", fill = TRUE)
+head(df)
+
+
+
+# Reshape the data to long format
+df_long <- reshape(df, varying=names(df)[-1], v.names="cell_count", 
+                   timevar="replicate", times=names(df)[-1], direction="long")
+
+
+
+
+# Create a treatment variable
+assign_treatment <- function(replicate) {
+  prefix <- substr(replicate, 1, 3)  # get the first two characters
+  if (prefix == 'c10') {
+    return('c1-')
+  } else if (prefix == 'c11') {
+    return('c1+')
+  } else if (prefix == 'nd0') {
+    return('nd5-')
+  } else if (prefix == 'nd1') {
+    return('nd5+')
+  }  else if (prefix == 'c20') {
+    return('c2-')
+  } else if (prefix == 'c21') {
+    return('c2+')
+  } else {
+    return('unknown')  # or whatever default value you want
+  }
+}
+
+df_long$treatment <- sapply(df_long$replicate, assign_treatment)
+
+##split the treatment into 2 seperate columns
+# Load the dplyr package
+library(dplyr)
+
+# Assuming your data frame is named df
+# Update the name accordingly if it differs
+df_long <- df_long %>%
+  mutate(
+    treatment = as.character(treatment),
+    # Create the 'tgfb1' column based on whether 'treatment' ends with '+' or '-'
+    tgfb1 = case_when(
+      grepl("\\+$", treatment) ~ "plus",
+      grepl("\\-$", treatment) ~ "minus",
+      TRUE ~ NA_character_
+    ),
+
+    # Create the 'nd5' column based on whether 'treatment' starts with 'c'
+    nd5 = case_when(
+      startsWith(treatment, "c") ~ "ctr",
+      TRUE ~ "nd5"
+    )
+  )
+
+# View the updated dataframe
+#head(df_long)
+
+#change the variable columns back to factor format
+# Convert 'treatment', 'nd5', and 'tgfb1' to factors
+df_long <- df_long %>%
+  mutate(
+    treatment = as.factor(treatment),
+    nd5 = as.factor(nd5),
+    tgfb1 = as.factor(tgfb1)
+  )
+
+# Verify the changes
+#str(df_long)
+
+
+
+
+
+
+
+# 
+# # Fit the mixed model
+# model <- lmer(log(cell_count) ~ treatment + (1|replicate), data=df_long)
+# # Get the summary of the model
+# summary(model)
+# 
+# ##results indicate random effect is not necessary
+
+
+
+model <- lm(log(cell_count) ~ treatment * Hours, data = df_long)
+summary(model)
+ 
+# ###testing emmeans
+# library(emmeans)
+# emmeans_result <- emmeans(model, pairwise ~ treatment | Hours)
+# summary(emmeans_result)
+
+
+#######################effect of tgfb1 and nd5###################
+
+
+#model <- lm(log(cell_count) ~ tgfb1*nd5 * Hours, data = df_long)
+#summary(model)
+# Fit the linear model with specified interaction terms
+model <- lm(log(cell_count) ~ tgfb1 + nd5 + Hours + tgfb1:Hours + nd5:Hours, data = df_long)
+
+# Print the summary of the model
+summary(model)
+
+
+
+
+
+#######################all pairs###################################
+# Get the levels of the treatment factor
+df_long$treatment <- as.factor(df_long$treatment)
+treatments <- levels(df_long$treatment)
+
+# Initialize a list to store the model summaries
+model_summaries <- list()
+
+# Loop over the treatments
+for (treat in treatments) {
+  # Relevel the treatment factor so that the current treatment is the reference category
+  df_long$treatment <- relevel(df_long$treatment, ref = treat)
+  
+  # Fit the model
+  model <- lm(log(cell_count) ~ treatment * Hours, data = df_long)
+  
+  # Store the summary of the model in the list
+  model_summaries[[treat]] <- summary(model)
+}
+
+# Now model_summaries is a list of model summaries, one for each treatment. You can access 
+# them using model_summaries[["ctr-"]], model_summaries[["ctr+"]], etc.
+
+print(model_summaries[["c1-"]])
+
+
+###########################################################################################
+
+# Create a new data frame for predictions
+newdata <- expand.grid(Hours = seq(min(df_long$Hours), max(df_long$Hours), length.out = 100),
+                       treatment = c("c1-", "c1+","nd5-","nd5+","c2-","c2+"))
+
+# Generate predictions
+newdata$pred <- predict(model, newdata)
+
+# Convert treatment to factor for plotting
+newdata$treatment <- as.factor(newdata$treatment)
+
+# Plot the observed data
+ggplot(df_long, aes(x = Hours, y = log(cell_count), color = treatment)) +
+  geom_point() +
+  # Add the model predictions
+  geom_line(data = newdata, aes(x = Hours, y = pred)) +
+  labs(x = "Time (hours)", y = "Log-transformed cell count") +
+  theme_classic()
+
+
+
+##calculate se and slope when fitted seorately
+
+# Fit a model to each treatment
+models <- df_long %>%
+  split(.$treatment) %>%
+  map(~ lm(log(cell_count) ~ Hours, data = .))
+
+# Tidy up the results
+tidied <- map_df(models, tidy, .id = "treatment")
+
+#library(emmeans)
+
+# Compute the EMMs
+#emm <- emmeans(tidied, "time..hour.", by = "treatment")
+
+
+# Compute the slopes
+slopes <- map(models, ~ coef(.)["Hours"])
+
+# Convert the slopes to a data frame
+slopes_df <- as.data.frame(do.call(rbind, slopes))
+names(slopes_df) <- "slope"
+
+# Compute the standard errors of the slopes
+se <- map(models, ~ sqrt(vcov(.)["Hours", "Hours"]))
+
+# Convert the standard errors to a data frame
+se_df <- as.data.frame(do.call(rbind, se))
+names(se_df) <- "se"
+
+# Combine the slopes and standard errors into one data frame
+results <- cbind(slopes_df, se_df)
+
+# Print the results
+print(results)
+
+
+
+
+
+```
+
+### Fitting 052721_12A_sup
+
+```{r 052721_12A_sup}
+
+
+##all libraries
+library(ggplot2)
+library(emmeans)
+library(broom)
+library(purrr)
+library(lme4)
+library(lmerTest)
+# Load the data
+#df <- read.table("031123_12a_d10.txt", header=TRUE)
+
+#There is NA in the row
+df <- read.delim("052721_12A_sup.txt", header = TRUE, na.strings = "", fill = TRUE)
+head(df)
+
+
+
+# Reshape the data to long format
+df_long <- reshape(df, varying=names(df)[-1], v.names="cell_count", 
+                   timevar="replicate", times=names(df)[-1], direction="long")
+
+
+# Create a treatment variable
+assign_treatment <- function(replicate) {
+  prefix <- substr(replicate, 1, 4)  # get the first two characters
+  if (prefix == 'ctrS') {
+    return('ctr_s+')
+  } else if (prefix == 'ctrN') {
+    return('ctr_s-') #no supplements
+  } else if (prefix == 'nd5S') {
+    return('nd5_s+')
+  } else if (prefix == 'nd5s') {
+    return('nd5_s+U-') #S-U, no uridine
+  }  else if (prefix == 'ndsS') {
+    return('nd5_suspension_s+')
+  } else if (prefix == 'ndss') {
+    return('nd5_suspension_s+U-') #suspension, no uridine, supplemented
+  } else {
+    return('unknown')  # or whatever default value you want
+  }
+}
+
+df_long$treatment <- sapply(df_long$replicate, assign_treatment)
+
+##############################################################################
+###split the treatment column into 4 columns
+## nd5, other supplements, uridine, suspension
+
+
+library(dplyr)
+
+# Assuming your data frame is named df
+# Update the name accordingly if it differs
+df_long <- df_long %>%
+  mutate(
+    treatment = as.character(treatment),
+    # Create the 'othersup' column based on whether 'treatment' ends with '+' or '-'
+    othersup = case_when(
+      grepl("\\+", treatment) ~ "plus",
+      grepl("\\-", treatment) ~ "minus",
+      TRUE ~ NA_character_
+    ),
+
+    # Create the 'nd5' column based on whether 'treatment' starts with 'c'
+    nd5 = case_when(
+      startsWith(treatment, "c") ~ "ctr",
+      TRUE ~ "nd5"
+    ),
+    
+    
+    uridine = case_when(
+      grepl("s\\+U-$", treatment) ~ "minus",
+      grepl("s\\+", treatment) ~ "plus",
+      
+      TRUE ~ "minus"
+    ),
+    
+    suspension = case_when(
+      grepl("suspension", treatment) ~ "sus",
+      TRUE ~ "no_sus"
+    )
+  )
+
+# View the updated dataframe
+#head(df_long)
+
+#change the variable columns back to factor format
+# Convert 'treatment', 'nd5', and 'tgfb1' to factors
+df_long <- df_long %>%
+  mutate(
+    treatment = as.factor(treatment),
+    nd5 = as.factor(nd5),
+    othersup = as.factor(othersup),
+    suspension = as.factor(suspension),
+    uridine = as.factor(uridine)
+  )
+
+# Verify the changes
+#str(df_long)
+
+
+
+
+
+
+#write_csv(df_long, "052721_12A_sup_growth_rate.csv")
+# # Fit the mixed model
+# model <- lmer(log(cell_count) ~ treatment + (1|replicate), data=df_long)
+# # Get the summary of the model
+# summary(model)
+# 
+# ##results indicate random effect is not necessary
+
+
+
+model <- lm(log(cell_count) ~ treatment * Hours, data = df_long)
+summary(model)
+ 
+# ###testing emmeans
+# library(emmeans)
+# emmeans_result <- emmeans(model, pairwise ~ treatment | Hours)
+# summary(emmeans_result)
+
+##############################################################################
+#####fitting each factor######################################################
+
+
+model <- lm(log(cell_count) ~ othersup * Hours + nd5* Hours + uridine * Hours + suspension * Hours, data = df_long)
+summary(model)
+
+
+
+
+#######################all pairs###################################
+# Get the levels of the treatment factor
+df_long$treatment <- as.factor(df_long$treatment)
+treatments <- levels(df_long$treatment)
+
+# Initialize a list to store the model summaries
+model_summaries <- list()
+
+# Loop over the treatments
+for (treat in treatments) {
+  # Relevel the treatment factor so that the current treatment is the reference category
+  df_long$treatment <- relevel(df_long$treatment, ref = treat)
+  
+  # Fit the model
+  model <- lm(log(cell_count) ~ treatment * Hours, data = df_long)
+  
+  # Store the summary of the model in the list
+  model_summaries[[treat]] <- summary(model)
+}
+
+# Now model_summaries is a list of model summaries, one for each treatment. You can access 
+# them using model_summaries[["ctr-"]], model_summaries[["ctr+"]], etc.
+
+print(model_summaries[["nd5_sup_noUridine"]])
+
+
+###########################################################################################
+
+# Create a new data frame for predictions
+newdata <- expand.grid(Hours = seq(min(df_long$Hours), max(df_long$Hours), length.out = 100),
+                       treatment = treatments)
+
+# Generate predictions
+newdata$pred <- predict(model, newdata)
+
+# Convert treatment to factor for plotting
+newdata$treatment <- as.factor(newdata$treatment)
+
+# Plot the observed data
+ggplot(df_long, aes(x = Hours, y = log(cell_count), color = treatment)) +
+  geom_point() +
+  # Add the model predictions
+  geom_line(data = newdata, aes(x = Hours, y = pred)) +
+  labs(x = "Time (hours)", y = "Log-transformed cell count") +
+  theme_classic()
+
+
+
+##calculate se and slope when fitted seorately
+
+# Fit a model to each treatment
+models <- df_long %>%
+  split(.$treatment) %>%
+  map(~ lm(log(cell_count) ~ Hours, data = .))
+
+# Tidy up the results
+tidied <- map_df(models, tidy, .id = "treatment")
+
+#library(emmeans)
+
+# Compute the EMMs
+#emm <- emmeans(tidied, "time..hour.", by = "treatment")
+
+
+# Compute the slopes
+slopes <- map(models, ~ coef(.)["Hours"])
+
+# Convert the slopes to a data frame
+slopes_df <- as.data.frame(do.call(rbind, slopes))
+names(slopes_df) <- "slope"
+
+# Compute the standard errors of the slopes
+se <- map(models, ~ sqrt(vcov(.)["Hours", "Hours"]))
+
+# Convert the standard errors to a data frame
+se_df <- as.data.frame(do.call(rbind, se))
+names(se_df) <- "se"
+
+# Combine the slopes and standard errors into one data frame
+results <- cbind(slopes_df, se_df)
+
+# Print the results
+print(results)
+
+
+###########################################################
+##split treatments for linear regression#################
+# Load the readxl package
+library(readxl)
+
+# File path - replace this with the path to your file
+file_path <- "052721_12A_sup_growth_rate_split_treatments.xls"
+
+# Read the Excel file
+data <- read_excel(file_path)
+data$cell_count <- as.numeric(data$cell_count)
+# drop NAs
+data <- na.omit(data, cols = "cell_count")
+
+# View the first few rows of the data
+model <- lm(log(cell_count) ~ nd5 * Hours + other_sup* Hours + Uridine*Hours + suspension*Hours , data = data)
+summary(model)
+ 
+
+
+```
+
+
+
+### Fitting 052721_hela_sup
+```{r 052721_hela_sup}
+
+
+##all libraries
+library(ggplot2)
+library(emmeans)
+library(broom)
+library(purrr)
+library(lme4)
+library(lmerTest)
+# Load the data
+#df <- read.table("031123_12a_d10.txt", header=TRUE)
+
+#There is NA in the row
+df <- read.delim("052721_hela_sup.txt", header = TRUE, na.strings = "", fill = TRUE)
+head(df)
+
+
+
+# Reshape the data to long format
+df_long <- reshape(df, varying=names(df)[-1], v.names="cell_count", 
+                   timevar="replicate", times=names(df)[-1], direction="long")
+
+
+# Create a treatment variable
+assign_treatment <- function(replicate) {
+  prefix <- substr(replicate, 1, 4)  # get the first two characters
+  if (prefix == 'ctrS') {
+    return('ctr_s+')
+  } else if (prefix == 'ctrN') {
+    return('ctr_no_sup')
+  } else if (prefix == 'nd5S') {
+    return('nd5_supplemented')
+  } else if (prefix == 'nd5s') {
+    return('nd5_sup_noUridine')
+  } else {
+    return('unknown')  # or whatever default value you want
+  }
+}
+
+df_long$treatment <- sapply(df_long$replicate, assign_treatment)
+
+
+# Create a supplement variable
+assign_sup <- function(replicate) {
+  prefix <- substr(replicate, 1, 4)  # get the first two characters
+  if (prefix == 'ctrS' | prefix == 'nd5S') {
+    return('sup+')
+  } else if (prefix == 'ctrN' | prefix == 'nd5s') {
+    return('sup-')
+  } else {
+    return('unknown')  # or whatever default value you want
+  }
+}
+df_long$sup <- sapply(df_long$replicate, assign_sup)
+
+#write.table(df_long, "df_long.txt", sep = "\t", row.names = FALSE)
+
+
+# # Fit the mixed model
+# model <- lmer(log(cell_count) ~ treatment + (1|replicate), data=df_long)
+# # Get the summary of the model
+# summary(model)
+# 
+# ##results indicate random effect is not necessary
+
+
+
+model <- lm(log(cell_count) ~ treatment * Hours, data = df_long)
+summary(model)
+ 
+##test effects of supplements
+model <- lm(log(cell_count) ~ sup * Hours, data = df_long)
+summary(model)
+
+# # ###testing emmeans
+#  library(emmeans)
+#  emmeans_result <- emmeans(model )
+#  summary(emmeans_result)
+
+
+## ANOCOVA on sup
+model <- lm(log(cell_count) ~ Hours * sup, data = df_long)
+
+summary(model)
+# Get the ANCOVA table
+anova(model)
+
+## add ctr/nd5 column
+
+df_long$mutation  <- ifelse(startsWith(df_long$replicate, "ctr"), "ctr", "nd5")
+## ANOCOVA on nd5 mutation only
+model <- lm(log(cell_count) ~ Hours * mutation, data = df_long)
+summary(model)
+anova(model)
+
+###fitted at the same time for mutatoin and sup########
+model <- lm(log(cell_count) ~ Hours * mutation * sup, data = df_long)
+summary(model)
+
+#######################all pairs###################################
+# Get the levels of the treatment factor
+df_long$treatment <- as.factor(df_long$treatment)
+treatments <- levels(df_long$treatment)
+
+# Initialize a list to store the model summaries
+model_summaries <- list()
+
+# Loop over the treatments
+for (treat in treatments) {
+  # Relevel the treatment factor so that the current treatment is the reference category
+  df_long$treatment <- relevel(df_long$treatment, ref = treat)
+  
+  # Fit the model
+  model <- lm(log(cell_count) ~ treatment * Hours, data = df_long)
+  
+  # Store the summary of the model in the list
+  model_summaries[[treat]] <- summary(model)
+}
+
+# Now model_summaries is a list of model summaries, one for each treatment. You can access 
+# them using model_summaries[["ctr-"]], model_summaries[["ctr+"]], etc.
+
+print(model_summaries[["ctr_no_sup"]])
+
+
+
+
+
+###########################################################################################
+
+# Create a new data frame for predictions
+newdata <- expand.grid(Hours = seq(min(df_long$Hours), max(df_long$Hours), length.out = 100),
+                       treatment = treatments)
+
+# Generate predictions
+newdata$pred <- predict(model, newdata)
+
+# Convert treatment to factor for plotting
+newdata$treatment <- as.factor(newdata$treatment)
+
+# Plot the observed data
+ggplot(df_long, aes(x = Hours, y = log(cell_count), color = treatment)) +
+  geom_point() +
+  # Add the model predictions
+  geom_line(data = newdata, aes(x = Hours, y = pred)) +
+  labs(x = "Time (hours)", y = "Log-transformed cell count") +
+  theme_classic()
+
+
+
+##calculate se and slope when fitted seorately
+
+# Fit a model to each treatment
+models <- df_long %>%
+  split(.$treatment) %>%
+  map(~ lm(log(cell_count) ~ Hours, data = .))
+
+# Tidy up the results
+tidied <- map_df(models, tidy, .id = "treatment")
+
+#library(emmeans)
+
+# Compute the EMMs
+#emm <- emmeans(tidied, "time..hour.", by = "treatment")
+
+
+# Compute the slopes
+slopes <- map(models, ~ coef(.)["Hours"])
+
+# Convert the slopes to a data frame
+slopes_df <- as.data.frame(do.call(rbind, slopes))
+names(slopes_df) <- "slope"
+
+# Compute the standard errors of the slopes
+se <- map(models, ~ sqrt(vcov(.)["Hours", "Hours"]))
+
+# Convert the standard errors to a data frame
+se_df <- as.data.frame(do.call(rbind, se))
+names(se_df) <- "se"
+
+# Combine the slopes and standard errors into one data frame
+results <- cbind(slopes_df, se_df)
+
+# Print the results
+print(results)
+
+
+
+
+
+```
+
+### Fitting 052721_hek293t_sup
+```{r 052721_hek293t_sup}
+
+
+##all libraries
+library(ggplot2)
+library(emmeans)
+library(broom)
+library(purrr)
+library(lme4)
+library(lmerTest)
+# Load the data
+df <- read.table("052721_hek293t_sup.txt", header=TRUE)
+
+# #There is NA in the row
+# df <- read.delim("052721_hek293t_sup.txt", header = TRUE, na.strings = "", fill = TRUE)
+# head(df)
+
+
+
+# Reshape the data to long format
+df_long <- reshape(df, varying=names(df)[-1], v.names="cell_count", 
+                   timevar="replicate", times=names(df)[-1], direction="long")
+
+
+# Create a treatment variable
+assign_treatment <- function(replicate) {
+  prefix <- substr(replicate, 1, 4)  # get the first two characters
+  if (prefix == 'ctrS') {
+    return('ctr_s+')
+  } else if (prefix == 'ctrN') {
+    return('ctr_no_sup')
+  } else if (prefix == 'nd5S') {
+    return('nd5_supplemented')
+  } else if (prefix == 'nd5s') {
+    return('nd5_no_sup')
+  } else {
+    return('unknown')  # or whatever default value you want
+  }
+}
+
+df_long$treatment <- sapply(df_long$replicate, assign_treatment)
+
+
+# Create a supplement variable
+assign_sup <- function(replicate) {
+  prefix <- substr(replicate, 1, 4)  # get the first two characters
+  if (prefix == 'ctrS' | prefix == 'nd5S') {
+    return('sup+')
+  } else if (prefix == 'ctrN' | prefix == 'nd5s') {
+    return('sup-')
+  } else {
+    return('unknown')  # or whatever default value you want
+  }
+}
+df_long$sup <- sapply(df_long$replicate, assign_sup)
+
+#write.table(df_long, "df_long.txt", sep = "\t", row.names = FALSE)
+
+
+# # Fit the mixed model
+# model <- lmer(log(cell_count) ~ treatment + (1|replicate), data=df_long)
+# # Get the summary of the model
+# summary(model)
+# 
+# ##results indicate random effect is not necessary
+
+
+
+model <- lm(log(cell_count) ~ treatment * Hours, data = df_long)
+summary(model)
+ 
+##test effects of supplements
+model <- lm(log(cell_count) ~ sup * Hours, data = df_long)
+summary(model)
+
+# # ###testing emmeans
+#  library(emmeans)
+#  emmeans_result <- emmeans(model )
+#  summary(emmeans_result)
+
+
+## ANOCOVA on sup
+model <- lm(log(cell_count) ~ Hours * sup, data = df_long)
+
+summary(model)
+# Get the ANCOVA table
+anova(model)
+
+## add ctr/nd5 column
+
+df_long$mutation  <- ifelse(startsWith(df_long$replicate, "ctr"), "ctr", "nd5")
+## ANOCOVA on nd5 mutation only
+model <- lm(log(cell_count) ~ Hours * mutation, data = df_long)
+summary(model)
+anova(model)
+#######################all pairs###################################
+# Get the levels of the treatment factor
+df_long$treatment <- as.factor(df_long$treatment)
+treatments <- levels(df_long$treatment)
+
+# Initialize a list to store the model summaries
+model_summaries <- list()
+
+# Loop over the treatments
+for (treat in treatments) {
+  # Relevel the treatment factor so that the current treatment is the reference category
+  df_long$treatment <- relevel(df_long$treatment, ref = treat)
+  
+  # Fit the model
+  model <- lm(log(cell_count) ~ treatment * Hours, data = df_long)
+  
+  # Store the summary of the model in the list
+  model_summaries[[treat]] <- summary(model)
+}
+
+# Now model_summaries is a list of model summaries, one for each treatment. You can access 
+# them using model_summaries[["ctr-"]], model_summaries[["ctr+"]], etc.
+
+print(model_summaries[["nd5_no_sup"]])
+
+
+
+
+
+###########################################################################################
+
+# Create a new data frame for predictions
+newdata <- expand.grid(Hours = seq(min(df_long$Hours), max(df_long$Hours), length.out = 100),
+                       treatment = treatments)
+
+# Generate predictions
+newdata$pred <- predict(model, newdata)
+
+# Convert treatment to factor for plotting
+newdata$treatment <- as.factor(newdata$treatment)
+
+# Plot the observed data
+ggplot(df_long, aes(x = Hours, y = log(cell_count), color = treatment)) +
+  geom_point() +
+  # Add the model predictions
+  geom_line(data = newdata, aes(x = Hours, y = pred)) +
+  labs(x = "Time (hours)", y = "Log-transformed cell count") +
+  theme_classic()
+
+
+
+##calculate se and slope when fitted seorately
+
+# Fit a model to each treatment
+models <- df_long %>%
+  split(.$treatment) %>%
+  map(~ lm(log(cell_count) ~ Hours, data = .))
+
+# Tidy up the results
+tidied <- map_df(models, tidy, .id = "treatment")
+
+#library(emmeans)
+
+# Compute the EMMs
+#emm <- emmeans(tidied, "time..hour.", by = "treatment")
+
+
+# Compute the slopes
+slopes <- map(models, ~ coef(.)["Hours"])
+
+# Convert the slopes to a data frame
+slopes_df <- as.data.frame(do.call(rbind, slopes))
+names(slopes_df) <- "slope"
+
+# Compute the standard errors of the slopes
+se <- map(models, ~ sqrt(vcov(.)["Hours", "Hours"]))
+
+# Convert the standard errors to a data frame
+se_df <- as.data.frame(do.call(rbind, se))
+names(se_df) <- "se"
+
+# Combine the slopes and standard errors into one data frame
+results <- cbind(slopes_df, se_df)
+
+# Print the results
+print(results)
+
+
+```
+
+
+
+
+
+
+

@@ -1,0 +1,102 @@
+---
+title: "treatment effect"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## GitHub Documents
+
+This file read in a prism exported text file and organize the table for linear regression for the effect of the treatment (TGFB1 or MT-ND5 mutation effects).
+
+It compares and selects the best fitted model.
+
+### data 1: RL1, 121522-12a-soft-agar-d12-10000seeding
+
+
+
+```{r organize data}
+
+
+library(lme4)
+library(lmerTest)
+# Load the data
+filename <- "/Users/yuanyuan/Downloads/github/treatment-effect-regression/data/12a_tgfb1_d12_soft_agar_both_count.txt"
+
+df <- read.table(filename, header = TRUE, sep = "\t", quote = "\"", fill = TRUE)
+
+library(tidyverse)
+
+
+
+long_df <- df %>%
+  pivot_longer(
+    cols = everything(), # Selects all columns to transform
+    names_to = "treatment", # This is the name of the new column for the variable names (corrected typo)
+    values_to = "value" # This is the name of the new column for the values
+  ) %>%
+  filter(!is.na(value)) %>%
+  mutate(
+    tgfb1 = case_when(
+      treatment == "c1"       ~ 0,
+      treatment == "c2"       ~ 0,
+      treatment == "c1.tgfb1" ~ 1,
+      treatment == "c2.tgfb1" ~ 1,
+      treatment == "n.tgfb1"  ~ 1,
+      treatment == "n"        ~ 0,
+      TRUE                    ~ NA_real_
+    ),
+    nd5 = case_when(
+      treatment == "c1"       ~ 0,
+      treatment == "c2"       ~ 0,
+      treatment == "c1.tgfb1" ~ 0,
+      treatment == "c2.tgfb1" ~ 0,
+      treatment == "n.tgfb1"  ~ 1,
+      treatment == "n"        ~ 1,
+      TRUE                    ~ NA_real_
+    ),
+    bioreplicate = case_when(
+      treatment == "c1"       ~ 1,
+      treatment == "c2"       ~ 2,
+      treatment == "c1.tgfb1" ~ 4,
+      treatment == "c2.tgfb1" ~ 5,
+      treatment == "n.tgfb1"  ~ 6,
+      treatment == "n"        ~ 3,
+      TRUE                    ~ NA_integer_
+    ),
+     nd5_3_level = case_when(
+      treatment == "c1"       ~ 1,
+      treatment == "c2"       ~ 2,
+      treatment == "c1.tgfb1" ~ 1,
+      treatment == "c2.tgfb1" ~ 2,
+      treatment == "n.tgfb1"  ~ 3,
+      treatment == "n"        ~ 3,
+      TRUE                    ~ NA_integer_
+    )
+  )
+
+
+model1 <- lm(value ~ tgfb1 * nd5, data = long_df)
+summary(model1)
+
+model2 <- lm(value ~ tgfb1 + nd5, data = long_df)
+summary(model2)
+
+anova(model2, model1)
+
+#pick model 2 as model 1 is not significantly better
+
+model3 <- lm(value ~ tgfb1 + nd5_3_level, data = long_df)
+summary(model3)
+
+#####this result of model 3 is confusing##########
+#to resolve this, c1 data is deleted#############
+
+df_long2 <- long_df %>% filter(nd5_3_level!=1) #eliminate c1s
+model4 <- lm(value ~ tgfb1 + nd5, data = df_long2)
+summary(model4)
+
+```
+
